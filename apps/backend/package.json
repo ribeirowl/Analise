@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@analise-futebol/shared": "*",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "helmet": "^7.1.0",

@@ -1,59 +1,91 @@
 import type { EnrichedMatch, ValuePick, BookmakerOdds, TeamSeasonStats } from "@analise-futebol/shared";
 
-const MIN_EDGE = 0.05; // 5% edge minimum
+const MIN_EDGE = 0.05;
 
-export function findValuePicks(match: EnrichedMatch): ValuePick[] {
+export interface PoissonInput {
+  homeExpectedGoals: number;
+  awayExpectedGoals: number;
+  eloDiff?: number;
+}
+
+export function buildPoissonInput(
+  homeStats: TeamSeasonStats | null,
+  awayStats: TeamSeasonStats | null,
+  eloDiff = 0,
+  homeXG?: number,
+  awayXG?: number
+): PoissonInput {
+  const gp_h = Math.max(homeStats?.gamesPlayed ?? 1, 1);
+  const gp_a = Math.max(awayStats?.gamesPlayed ?? 1, 1);
+
+  let homeAvgGF = (homeStats?.goalsScored ?? 0) / gp_h || 1.3;
+  let awayAvgGF = (awayStats?.goalsScored ?? 0) / gp_a || 1.1;
+  const homeAvgGA = (homeStats?.goalsConceded ?? 0) / gp_h || 1.2;
+  const awayAvgGA = (awayStats?.goalsConceded ?? 0) / gp_a || 1.4;
+
+  // Blend with xG from Understat when available (more predictive)
+  if (homeXG) homeAvgGF = homeAvgGF * 0.4 + homeXG * 0.6;
+  if (awayXG) awayAvgGF = awayAvgGF * 0.4 + awayXG * 0.6;
+
+  // Dixon-Coles style: attack × defense of opponent / league avg
+  const leagueAvg = 1.25;
+  const homeExpected = (homeAvgGF / leagueAvg) * (awayAvgGA / leagueAvg) * leagueAvg;
+  const awayExpected = (awayAvgGF / leagueAvg) * (homeAvgGA / leagueAvg) * leagueAvg;
+
+  // Elo adjustment: every 200 Elo points → ~0.2 expected goals difference
+  const eloAdj = eloDiff / 1000;
+
+  return {
+    homeExpectedGoals: Math.max(homeExpected + eloAdj + 0.3, 0.1), // +0.3 home advantage
+    awayExpectedGoals: Math.max(awayExpected - eloAdj, 0.1),
+    eloDiff,
+  };
+}
+
+export function findValuePicks(match: EnrichedMatch, poissonInput?: PoissonInput): ValuePick[] {
   if (!match.odds || match.odds.bookmakers.length === 0) return [];
 
-  const picks: ValuePick[] = [];
+  // If no explicit input, build from season stats
+  const input = poissonInput ?? buildPoissonInput(match.homeSeasonStats, match.awaySeasonStats);
+  const { homeExpectedGoals, awayExpectedGoals } = input;
 
-  // Best odds across all bookmakers
+  const picks: ValuePick[] = [];
   const best = getBestOdds(match.odds.bookmakers);
 
-  // Home stats
-  const homeStats = match.homeSeasonStats;
-  const awayStats = match.awaySeasonStats;
+  // ── Poisson probabilities ─────────────────────────────────────────────
+  const homeWinProb = poissonHomeWin(homeExpectedGoals, awayExpectedGoals);
+  const awayWinProb = poissonAwayWin(homeExpectedGoals, awayExpectedGoals);
+  const drawProb = Math.max(1 - homeWinProb - awayWinProb, 0.05);
 
-  // ── 1X2 value ────────────────────────────────────────────────────────────
-  if (homeStats && awayStats && best.home && best.draw && best.away) {
-    const homeWinProb = estimateHomeWinProb(homeStats, awayStats);
-    const drawProb = estimateDrawProb(homeStats, awayStats);
-    const awayWinProb = 1 - homeWinProb - drawProb;
+  const avgGoals = homeExpectedGoals + awayExpectedGoals;
+  const probOver25 = poissonOver(avgGoals, 2);
+  const probBTTS = (1 - Math.exp(-homeExpectedGoals)) * (1 - Math.exp(-awayExpectedGoals));
 
-    checkValue(picks, match, "home_win", `Vitória ${match.homeTeam.name}`, best.home, best.homeBookmaker, homeWinProb);
-    checkValue(picks, match, "draw", "Empate", best.draw, best.drawBookmaker, drawProb);
-    checkValue(picks, match, "away_win", `Vitória ${match.awayTeam.name}`, best.away, best.awayBookmaker, awayWinProb);
+  // 1X2
+  if (best.home) checkValue(picks, match, "home_win", `Vitória ${match.homeTeam.name}`, best.home, best.homeBookmaker, homeWinProb);
+  if (best.draw) checkValue(picks, match, "draw", "Empate", best.draw, best.drawBookmaker, drawProb);
+  if (best.away) checkValue(picks, match, "away_win", `Vitória ${match.awayTeam.name}`, best.away, best.awayBookmaker, awayWinProb);
+
+  // Totals
+  if (best.over25) checkValue(picks, match, "over_25", "Mais de 2.5 gols", best.over25, best.over25Bookmaker, probOver25);
+  if (best.under25) checkValue(picks, match, "under_25", "Menos de 2.5 gols", best.under25, best.under25Bookmaker, 1 - probOver25);
+
+  // BTTS
+  if (best.btts_yes) checkValue(picks, match, "btts_yes", "Ambas marcam: Sim", best.btts_yes, best.btts_yes_bookmaker, probBTTS);
+  if (best.btts_no) checkValue(picks, match, "btts_no", "Ambas marcam: Não", best.btts_no, best.btts_no_bookmaker, 1 - probBTTS);
+
+  const result = picks.sort((a, b) => b.edge - a.edge);
+  if (result.length > 0) {
+    const edges = result.map((p) => p.edge.toFixed(3)).join(", ");
+    console.log(`[VALUE] ${match.homeTeam.name} vs ${match.awayTeam.name}: ${result.length} picks [${edges}]`);
   }
-
-  // ── Over/Under 2.5 value ──────────────────────────────────────────────────
-  if (homeStats && awayStats && best.over25 && best.under25) {
-    const avgGoals = estimateAvgGoals(homeStats, awayStats);
-    // Poisson approximation P(X>=3) where X ~ Poisson(avgGoals)
-    const probOver25 = poissonOver(avgGoals, 2);
-    const probUnder25 = 1 - probOver25;
-
-    checkValue(picks, match, "over_25", "Mais de 2.5 gols", best.over25, best.over25Bookmaker, probOver25);
-    checkValue(picks, match, "under_25", "Menos de 2.5 gols", best.under25, best.under25Bookmaker, probUnder25);
-  }
-
-  // ── BTTS ──────────────────────────────────────────────────────────────────
-  if (homeStats && awayStats && best.btts_yes && best.btts_no) {
-    const probBTTS = estimateBTTS(homeStats, awayStats);
-    checkValue(picks, match, "btts_yes", "Ambas marcam: Sim", best.btts_yes, best.btts_yes_bookmaker, probBTTS);
-    checkValue(picks, match, "btts_no", "Ambas marcam: Não", best.btts_no, best.btts_no_bookmaker, 1 - probBTTS);
-  }
-
-  return picks.sort((a, b) => b.edge - a.edge);
+  return result;
 }
 
 function checkValue(
-  picks: ValuePick[],
-  match: EnrichedMatch,
-  market: ValuePick["market"],
-  description: string,
-  odd: number,
-  bookmaker: string,
-  estimatedProb: number
+  picks: ValuePick[], match: EnrichedMatch,
+  market: ValuePick["market"], description: string,
+  odd: number, bookmaker: string, estimatedProb: number
 ) {
   const impliedProb = 1 / odd;
   const edge = estimatedProb - impliedProb;
@@ -63,10 +95,7 @@ function checkValue(
       homeTeam: match.homeTeam.name,
       awayTeam: match.awayTeam.name,
       competition: match.competition.name,
-      market,
-      description,
-      bookmaker,
-      odd,
+      market, description, bookmaker, odd,
       impliedProbability: impliedProb,
       estimatedProbability: estimatedProb,
       edge,
@@ -86,91 +115,54 @@ interface BestOdds {
 }
 
 function getBestOdds(bookmakers: BookmakerOdds[]): BestOdds {
-  const result: BestOdds = {
-    home: null, homeBookmaker: "",
-    draw: null, drawBookmaker: "",
-    away: null, awayBookmaker: "",
-    over25: null, over25Bookmaker: "",
-    under25: null, under25Bookmaker: "",
-    btts_yes: null, btts_yes_bookmaker: "",
+  const r: BestOdds = {
+    home: null, homeBookmaker: "", draw: null, drawBookmaker: "",
+    away: null, awayBookmaker: "", over25: null, over25Bookmaker: "",
+    under25: null, under25Bookmaker: "", btts_yes: null, btts_yes_bookmaker: "",
     btts_no: null, btts_no_bookmaker: "",
   };
-
   for (const bm of bookmakers) {
-    if (bm.home && (result.home === null || bm.home > result.home)) {
-      result.home = bm.home; result.homeBookmaker = bm.bookmaker;
-    }
-    if (bm.draw && (result.draw === null || bm.draw > result.draw)) {
-      result.draw = bm.draw; result.drawBookmaker = bm.bookmaker;
-    }
-    if (bm.away && (result.away === null || bm.away > result.away)) {
-      result.away = bm.away; result.awayBookmaker = bm.bookmaker;
-    }
-    if (bm.over25 && (result.over25 === null || bm.over25 > result.over25)) {
-      result.over25 = bm.over25; result.over25Bookmaker = bm.bookmaker;
-    }
-    if (bm.under25 && (result.under25 === null || bm.under25 > result.under25)) {
-      result.under25 = bm.under25; result.under25Bookmaker = bm.bookmaker;
-    }
-    if (bm.btts_yes && (result.btts_yes === null || bm.btts_yes > result.btts_yes)) {
-      result.btts_yes = bm.btts_yes; result.btts_yes_bookmaker = bm.bookmaker;
-    }
-    if (bm.btts_no && (result.btts_no === null || bm.btts_no > result.btts_no)) {
-      result.btts_no = bm.btts_no; result.btts_no_bookmaker = bm.bookmaker;
-    }
+    if (bm.home && (!r.home || bm.home > r.home)) { r.home = bm.home; r.homeBookmaker = bm.bookmaker; }
+    if (bm.draw && (!r.draw || bm.draw > r.draw)) { r.draw = bm.draw; r.drawBookmaker = bm.bookmaker; }
+    if (bm.away && (!r.away || bm.away > r.away)) { r.away = bm.away; r.awayBookmaker = bm.bookmaker; }
+    if (bm.over25 && (!r.over25 || bm.over25 > r.over25)) { r.over25 = bm.over25; r.over25Bookmaker = bm.bookmaker; }
+    if (bm.under25 && (!r.under25 || bm.under25 > r.under25)) { r.under25 = bm.under25; r.under25Bookmaker = bm.bookmaker; }
+    if (bm.btts_yes && (!r.btts_yes || bm.btts_yes > r.btts_yes)) { r.btts_yes = bm.btts_yes; r.btts_yes_bookmaker = bm.bookmaker; }
+    if (bm.btts_no && (!r.btts_no || bm.btts_no > r.btts_no)) { r.btts_no = bm.btts_no; r.btts_no_bookmaker = bm.bookmaker; }
   }
-  return result;
+  return r;
 }
 
-// ── Statistical models ────────────────────────────────────────────────────
-
-function estimateHomeWinProb(home: TeamSeasonStats, away: TeamSeasonStats): number {
-  const gp_h = home.gamesPlayed ?? 1;
-  const gp_a = away.gamesPlayed ?? 1;
-  const homeWinRate = (home.wins ?? 0) / gp_h;
-  const awayLossRate = (away.losses ?? 0) / gp_a;
-  // Simple average with home advantage factor
-  const base = (homeWinRate * 0.6 + awayLossRate * 0.4) * 1.05;
-  return Math.min(Math.max(base, 0.1), 0.75);
+// ── Poisson distribution math ─────────────────────────────────────────────
+function poissonProb(lambda: number, k: number): number {
+  return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
 }
 
-function estimateDrawProb(home: TeamSeasonStats, away: TeamSeasonStats): number {
-  const gp_h = home.gamesPlayed ?? 1;
-  const gp_a = away.gamesPlayed ?? 1;
-  const homeDrawRate = (home.draws ?? 0) / gp_h;
-  const awayDrawRate = (away.draws ?? 0) / gp_a;
-  return Math.min(Math.max((homeDrawRate + awayDrawRate) / 2, 0.1), 0.4);
-}
-
-function estimateAvgGoals(home: TeamSeasonStats, away: TeamSeasonStats): number {
-  const gp_h = home.gamesPlayed ?? 1;
-  const gp_a = away.gamesPlayed ?? 1;
-  const homeAvg = (home.goalsScored ?? 0) / gp_h;
-  const awayConcede = (away.goalsConceded ?? 0) / gp_a;
-  const awayAvg = (away.goalsScored ?? 0) / gp_a;
-  const homeConcede = (home.goalsConceded ?? 0) / gp_h;
-  return (homeAvg + awayConcede + awayAvg + homeConcede) / 2;
-}
-
-function estimateBTTS(home: TeamSeasonStats, away: TeamSeasonStats): number {
-  const gp_h = home.gamesPlayed ?? 1;
-  const gp_a = away.gamesPlayed ?? 1;
-  // P(home scores) * P(away scores)
-  const homeScoreRate = Math.min((home.goalsScored ?? 0) / gp_h / 2.5, 0.95);
-  const awayScoreRate = Math.min((away.goalsScored ?? 0) / gp_a / 2.5, 0.95);
-  return homeScoreRate * awayScoreRate;
-}
-
-// Poisson CDF: P(X > k) = 1 - P(X <= k)
 function poissonOver(lambda: number, k: number): number {
+  let p = 0;
+  for (let i = 0; i <= k; i++) p += poissonProb(lambda, i);
+  return 1 - p;
+}
+
+function poissonHomeWin(lambdaH: number, lambdaA: number): number {
   let prob = 0;
-  for (let i = 0; i <= k; i++) {
-    prob += (Math.exp(-lambda) * lambda ** i) / factorial(i);
-  }
-  return 1 - prob;
+  for (let h = 1; h <= 8; h++)
+    for (let a = 0; a < h; a++)
+      prob += poissonProb(lambdaH, h) * poissonProb(lambdaA, a);
+  return prob;
+}
+
+function poissonAwayWin(lambdaH: number, lambdaA: number): number {
+  let prob = 0;
+  for (let a = 1; a <= 8; a++)
+    for (let h = 0; h < a; h++)
+      prob += poissonProb(lambdaH, h) * poissonProb(lambdaA, a);
+  return prob;
 }
 
 function factorial(n: number): number {
   if (n <= 1) return 1;
-  return n * factorial(n - 1);
+  let r = 1;
+  for (let i = 2; i <= n; i++) r *= i;
+  return r;
 }

@@ -10,7 +10,9 @@ import matchesRouter from "./routes/matches";
 import oddsRouter from "./routes/odds";
 import valueRouter from "./routes/value";
 import teamsRouter from "./routes/teams";
+import predictionsRouter from "./routes/predictions";
 import { startRefreshJobs } from "./jobs/refreshOdds";
+import { getApiFootballQuota } from "./services/apiFootball";
 import type { HealthStatus } from "@analise-futebol/shared";
 
 const app = express();
@@ -25,9 +27,11 @@ app.use("/api/matches", matchesRouter);
 app.use("/api/odds", oddsRouter);
 app.use("/api/value", valueRouter);
 app.use("/api/teams", teamsRouter);
+app.use("/api/matches", predictionsRouter);
 
 app.get("/api/health", (_req, res) => {
-  const quota = getOddsApiQuota();
+  const oddsQuota = getOddsApiQuota();
+  const afQuota = getApiFootballQuota();
   const health: HealthStatus = {
     status: "ok",
     uptime: process.uptime(),
@@ -37,11 +41,16 @@ app.get("/api/health", (_req, res) => {
       sofascore: "ok",
       theOddsApi: {
         status: "ok",
-        requestsRemaining: quota.requestsRemaining ?? undefined,
-        requestsUsed: quota.requestsUsed ?? undefined,
+        requestsRemaining: oddsQuota.requestsRemaining ?? undefined,
+        requestsUsed: oddsQuota.requestsUsed ?? undefined,
       },
     },
     cacheSize: cache.size(),
+    // @ts-ignore
+    apiFootball: {
+      status: config.API_FOOTBALL_KEY ? "ok" : "no_key",
+      requestsRemaining: afQuota.requestsRemaining ?? undefined,
+    },
   };
   res.json(health);
 });

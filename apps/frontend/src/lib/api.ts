@@ -2,8 +2,8 @@ import type { EnrichedMatch, MatchOdds, ValuePick, ApiResponse } from "@analise-
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { next: { revalidate: 60 } });
+async function get<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { next: { revalidate: 60 }, ...opts });
   if (!res.ok) throw new Error(`API error ${res.status} — ${path}`);
   return res.json();
 }
@@ -21,6 +21,21 @@ export async function fetchMatch(id: string): Promise<EnrichedMatch> {
 
 export async function fetchMatchOdds(id: string): Promise<MatchOdds | null> {
   const body = await get<{ data: MatchOdds | null }>(`/api/odds/match/${id}`);
+  return body.data;
+}
+
+export async function fetchH2H(id: string) {
+  const body = await get<{ data: unknown }>(`/api/matches/${id}/h2h`);
+  return body.data;
+}
+
+export async function fetchPredictions(id: string) {
+  const body = await get<{ data: unknown }>(`/api/matches/${id}/predictions`);
+  return body.data;
+}
+
+export async function fetchInjuries(id: string) {
+  const body = await get<{ data: unknown[] }>(`/api/matches/${id}/injuries`);
   return body.data;
 }
 

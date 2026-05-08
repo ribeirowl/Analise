@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const envSchema = z.object({
   FOOTBALL_DATA_API_KEY: z.string().min(1, "FOOTBALL_DATA_API_KEY is required"),
+  API_FOOTBALL_KEY: z.string().default(""),
+  API_FOOTBALL_BASE_URL: z.string().default("https://v3.football.api-sports.io"),
+  THESPORTSDB_KEY: z.string().default("3"),
   ODDS_API_KEY: z.string().default(""),
   ODDS_API_REGIONS: z.string().default("eu,uk"),
   ODDS_API_BOOKMAKERS: z.string().default("bet365,pinnacle,betfair_ex_eu"),
