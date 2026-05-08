@@ -108,6 +108,7 @@ export const FOOTBALL_SPORT_KEYS = [
 ];
 
 export async function getOddsForSport(sportKey: string): Promise<RawEvent[]> {
+  if (!config.ODDS_API_KEY) return [];
   const markets = "h2h,totals";
   const regions = config.ODDS_API_REGIONS;
   const path = `/sports/${sportKey}/odds?regions=${regions}&markets=${markets}&oddsFormat=decimal`;

@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: analise-futebol-backend
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: apps/backend
+    buildCommand: npm install && npx tsc
+    startCommand: node dist/apps/backend/src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: PORT
+        value: 3001
+      - key: ODDS_API_REGIONS
+        value: eu,uk
+      - key: ODDS_API_BOOKMAKERS
+        value: bet365,pinnacle,betfair_ex_eu
+      - key: SOFASCORE_USER_AGENT
+        value: Mozilla/5.0 (compatible; FutebolAnalise/1.0; educational)
+      - key: FOOTBALL_DATA_API_KEY
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
