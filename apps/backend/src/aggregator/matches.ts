@@ -1,141 +1,221 @@
 import { cache, TTL } from "../cache";
 import { logger } from "../logger";
+import { getScheduledEvents, getLineups, getTeamTopPlayers, getTeamSeasonStats, SofascoreEvent } from "../services/sofascore";
 import { getTodayMatches } from "../services/footballData";
-import { getScheduledEvents, getLineups, getTeamTopPlayers, getTeamSeasonStats } from "../services/sofascore";
-import { getAllFootballOdds, normalizeOdds, findOddsEvent } from "../services/theOddsApi";
-import { getSofascoreTeamId } from "./teamMapper";
+import { getAllFootballOdds, normalizeOdds, findOddsEvent, RawEvent } from "../services/theOddsApi";
 import { findValuePicks } from "./valueFinder";
-import type { EnrichedMatch, Match } from "@analise-futebol/shared";
+import type { EnrichedMatch, Match, Competition, Team, MatchOdds } from "@analise-futebol/shared";
 
+// Sport key → competition name mapping
+const SPORT_KEY_NAMES: Record<string, string> = {
+  soccer_brazil_campeonato: "Brasileirão Série A",
+  soccer_epl: "Premier League",
+  soccer_spain_la_liga: "La Liga",
+  soccer_italy_serie_a: "Serie A",
+  soccer_germany_bundesliga: "Bundesliga",
+  soccer_france_ligue_one: "Ligue 1",
+  soccer_uefa_champs_league: "UEFA Champions League",
+  soccer_uefa_europa_league: "UEFA Europa League",
+  soccer_conmebol_copa_libertadores: "Copa Libertadores",
+  soccer_portugal_primeira_liga: "Primeira Liga",
+  soccer_netherlands_eredivisie: "Eredivisie",
+};
+
+// ── List: fast, uses football-data.org + The Odds API as sources ──────────
 export async function getEnrichedTodayMatches(date?: string): Promise<EnrichedMatch[]> {
   const today = date ?? new Date().toISOString().slice(0, 10);
-  const cacheKey = `enriched:${today}`;
+  const cacheKey = `enriched:list:${today}`;
   const cached = cache.get<EnrichedMatch[]>(cacheKey);
   if (cached) return cached;
 
-  logger.info(`Fetching enriched matches for ${today}`);
+  logger.info(`Fetching match list for ${today}`);
 
-  // Parallel: fetch from all sources
-  const [fdMatches, ssEvents, allOddsEvents] = await Promise.all([
-    getTodayMatches(today),
+  const [ssEvents, fdMatches, allOddsEvents] = await Promise.all([
     getScheduledEvents(today),
+    getTodayMatches(today),
     getAllFootballOdds(),
   ]);
 
-  const oddsMap = normalizeOdds(allOddsEvents);
+  logger.info(`Sofascore: ${ssEvents.length} | FD: ${fdMatches.length} | OddsAPI: ${allOddsEvents.length} events`);
 
-  // Enrich each match
-  const enriched = await Promise.all(
-    fdMatches.map((match) => enrichMatch(match, ssEvents, allOddsEvents, oddsMap))
-  );
+  const oddsMap = normalizeOdds(allOddsEvents);
+  const matchMap = new Map<string, EnrichedMatch>();
+
+  // 1. Add Sofascore matches (best source if available)
+  if (ssEvents.length > 0) {
+    for (const ev of ssEvents) {
+      const m = buildFromSofascore(ev, allOddsEvents, oddsMap);
+      matchMap.set(normalizeKey(m.homeTeam.name, m.awayTeam.name), m);
+    }
+  }
+
+  // 2. Add football-data.org matches (may overlap with Sofascore or be unique)
+  for (const m of fdMatches) {
+    const key = normalizeKey(m.homeTeam.name, m.awayTeam.name);
+    if (!matchMap.has(key)) {
+      const oddsEvent = findOddsEvent(m.homeTeam.name, m.awayTeam.name, allOddsEvents);
+      const enriched: EnrichedMatch = {
+        ...m,
+        odds: oddsEvent ? (oddsMap.get(oddsEvent.id) ?? null) : null,
+        homeLineup: null, awayLineup: null,
+        homeTopPlayers: [], awayTopPlayers: [],
+        homeSeasonStats: null, awaySeasonStats: null,
+        valuePicks: [],
+        lastEnriched: new Date().toISOString(),
+      };
+      matchMap.set(key, enriched);
+    }
+  }
+
+  // 3. Add remaining Odds API events as matches (covers leagues not in other sources)
+  const todayStart = new Date(today + "T00:00:00Z").getTime() / 1000;
+  const todayEnd = todayStart + 86400;
+
+  for (const ev of allOddsEvents) {
+    const key = normalizeKey(ev.home_team, ev.away_team);
+    if (matchMap.has(key)) continue;
+
+    const commenceTs = new Date(ev.commence_time).getTime() / 1000;
+    if (commenceTs < todayStart || commenceTs >= todayEnd) continue;
+
+    const odds = oddsMap.get(ev.id) ?? null;
+    const competitionName = SPORT_KEY_NAMES[ev.sport_key] ?? ev.sport_title;
+
+    const match: EnrichedMatch = {
+      id: `odds_${ev.id}`,
+      oddsApiEventId: ev.id,
+      competition: { id: 0, name: competitionName, code: ev.sport_key },
+      homeTeam: { id: 0, name: ev.home_team },
+      awayTeam: { id: 0, name: ev.away_team },
+      utcDate: ev.commence_time,
+      status: inferStatus(ev.commence_time),
+      score: { fullTime: { home: null, away: null }, halfTime: { home: null, away: null } },
+      odds,
+      homeLineup: null, awayLineup: null,
+      homeTopPlayers: [], awayTopPlayers: [],
+      homeSeasonStats: null, awaySeasonStats: null,
+      valuePicks: [],
+      lastEnriched: new Date().toISOString(),
+    };
+
+    matchMap.set(key, match);
+  }
+
+  const matches = Array.from(matchMap.values());
+
+  // Sort: live → scheduled by time → finished
+  matches.sort((a, b) => {
+    const order = (s: string) => s === "IN_PLAY" || s === "PAUSED" ? 0 : s === "FINISHED" ? 2 : 1;
+    const diff = order(a.status) - order(b.status);
+    if (diff !== 0) return diff;
+    return new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime();
+  });
+
+  logger.info(`Total enriched matches: ${matches.length}`);
+  cache.set(cacheKey, matches, TTL.ENRICHED_MATCH);
+  return matches;
+}
+
+// ── Detail: full enrichment for one game ──────────────────────────────────
+export async function getEnrichedMatch(id: string): Promise<EnrichedMatch | null> {
+  const cacheKey = `enriched:detail:${id}`;
+  const cached = cache.get<EnrichedMatch>(cacheKey);
+  if (cached) return cached;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const list = await getEnrichedTodayMatches(today);
+  const base = list.find((m) => m.id === id);
+  if (!base) return null;
+
+  // Only enrich if we have a Sofascore ID
+  if (!base.sofascoreId) return base;
+
+  logger.info(`Enriching match detail for ${id}`);
+
+  const ev_id = base.sofascoreId;
+  const tid = base.competition.id;
+
+  const [lineups, homeStats, awayStats, homePlayers, awayPlayers] = await Promise.all([
+    getLineups(ev_id),
+    tid ? getTeamSeasonStats(base.homeTeam.id, tid, 0) : Promise.resolve(null),
+    tid ? getTeamSeasonStats(base.awayTeam.id, tid, 0) : Promise.resolve(null),
+    tid ? getTeamTopPlayers(base.homeTeam.id, tid, 0) : Promise.resolve([]),
+    tid ? getTeamTopPlayers(base.awayTeam.id, tid, 0) : Promise.resolve([]),
+  ]);
+
+  const enriched: EnrichedMatch = {
+    ...base,
+    homeLineup: lineups?.home ?? null,
+    awayLineup: lineups?.away ?? null,
+    homeSeasonStats: homeStats ? { ...homeStats, teamName: base.homeTeam.name } : null,
+    awaySeasonStats: awayStats ? { ...awayStats, teamName: base.awayTeam.name } : null,
+    homeTopPlayers: homePlayers,
+    awayTopPlayers: awayPlayers,
+    lastEnriched: new Date().toISOString(),
+  };
+  enriched.valuePicks = findValuePicks(enriched);
 
   cache.set(cacheKey, enriched, TTL.ENRICHED_MATCH);
   return enriched;
 }
 
-export async function getEnrichedMatch(id: string): Promise<EnrichedMatch | null> {
-  const cacheKey = `enriched:single:${id}`;
-  const cached = cache.get<EnrichedMatch>(cacheKey);
-  if (cached) return cached;
-
-  const today = new Date().toISOString().slice(0, 10);
-  const all = await getEnrichedTodayMatches(today);
-  return all.find((m) => m.id === id) ?? null;
-}
-
-async function enrichMatch(
-  match: Match,
-  ssEvents: Awaited<ReturnType<typeof getScheduledEvents>>,
-  allOddsEvents: Parameters<typeof normalizeOdds>[0],
+// ── Helpers ────────────────────────────────────────────────────────────────
+function buildFromSofascore(
+  ev: SofascoreEvent,
+  allOddsEvents: RawEvent[],
   oddsMap: ReturnType<typeof normalizeOdds>
-): Promise<EnrichedMatch> {
-  const base: EnrichedMatch = {
-    ...match,
-    odds: null,
-    homeLineup: null,
-    awayLineup: null,
-    homeTopPlayers: [],
-    awayTopPlayers: [],
-    homeSeasonStats: null,
-    awaySeasonStats: null,
+): EnrichedMatch {
+  const oddsEvent = findOddsEvent(ev.homeTeam.name, ev.awayTeam.name, allOddsEvents);
+  return {
+    id: `ss_${ev.id}`,
+    sofascoreId: ev.id,
+    oddsApiEventId: oddsEvent?.id,
+    competition: {
+      id: ev.tournament.uniqueTournament?.id ?? ev.tournament.id,
+      name: ev.tournament.name,
+      code: ev.tournament.category?.country?.name ?? "",
+      country: ev.tournament.category?.country?.name,
+    },
+    homeTeam: { id: ev.homeTeam.id, name: ev.homeTeam.name },
+    awayTeam: { id: ev.awayTeam.id, name: ev.awayTeam.name },
+    utcDate: new Date(ev.startTimestamp * 1000).toISOString(),
+    status: normalizeStatus(ev.status?.type),
+    score: {
+      fullTime: { home: ev.homeScore?.current ?? null, away: ev.awayScore?.current ?? null },
+      halfTime: { home: null, away: null },
+    },
+    venue: ev.venue?.stadium?.name ?? ev.venue?.city?.name,
+    odds: oddsEvent ? (oddsMap.get(oddsEvent.id) ?? null) : null,
+    homeLineup: null, awayLineup: null,
+    homeTopPlayers: [], awayTopPlayers: [],
+    homeSeasonStats: null, awaySeasonStats: null,
     valuePicks: [],
     lastEnriched: new Date().toISOString(),
   };
-
-  // ── Match Sofascore event ────────────────────────────────────────────────
-  const homeSsId = getSofascoreTeamId(match.homeTeam.id, match.homeTeam.name, ssEvents);
-  const awaySsId = getSofascoreTeamId(match.awayTeam.id, match.awayTeam.name, ssEvents);
-
-  const ssEvent = ssEvents.find(
-    (ev) =>
-      (homeSsId && ev.homeTeam.id === homeSsId) ||
-      (awaySsId && ev.awayTeam.id === awaySsId) ||
-      (ev.homeTeam.name.toLowerCase().includes(match.homeTeam.name.toLowerCase().slice(0, 4)) &&
-        ev.awayTeam.name.toLowerCase().includes(match.awayTeam.name.toLowerCase().slice(0, 4)))
-  );
-
-  if (ssEvent) {
-    base.sofascoreId = ssEvent.id;
-
-    // Fetch lineups + stats in parallel (best-effort)
-    const [lineups, homeStats, awayStats] = await Promise.all([
-      getLineups(ssEvent.id),
-      homeSsId && ssEvent.tournament.uniqueTournament?.id
-        ? getTeamSeasonStats(
-            homeSsId,
-            ssEvent.tournament.uniqueTournament.id,
-            ssEvent.tournament.uniqueTournament.seasons?.[0]?.id ?? 0
-          )
-        : Promise.resolve(null),
-      awaySsId && ssEvent.tournament.uniqueTournament?.id
-        ? getTeamSeasonStats(
-            awaySsId,
-            ssEvent.tournament.uniqueTournament.id,
-            ssEvent.tournament.uniqueTournament.seasons?.[0]?.id ?? 0
-          )
-        : Promise.resolve(null),
-    ]);
-
-    if (lineups) {
-      base.homeLineup = lineups.home;
-      base.awayLineup = lineups.away;
-    }
-
-    if (homeStats) {
-      base.homeSeasonStats = { ...homeStats, teamName: match.homeTeam.name };
-    }
-    if (awayStats) {
-      base.awaySeasonStats = { ...awayStats, teamName: match.awayTeam.name };
-    }
-
-    // Top players (async, don't block)
-    if (
-      homeSsId &&
-      awaySsId &&
-      ssEvent.tournament.uniqueTournament?.id &&
-      ssEvent.tournament.uniqueTournament?.seasons?.[0]?.id
-    ) {
-      const tid = ssEvent.tournament.uniqueTournament.id;
-      const sid = ssEvent.tournament.uniqueTournament.seasons[0].id;
-      const [homePlayers, awayPlayers] = await Promise.all([
-        getTeamTopPlayers(homeSsId, tid, sid),
-        getTeamTopPlayers(awaySsId, tid, sid),
-      ]);
-      base.homeTopPlayers = homePlayers;
-      base.awayTopPlayers = awayPlayers;
-    }
-  }
-
-  // ── Match Odds ────────────────────────────────────────────────────────────
-  const oddsEvent = findOddsEvent(match.homeTeam.name, match.awayTeam.name, allOddsEvents);
-  if (oddsEvent) {
-    base.oddsApiEventId = oddsEvent.id;
-    base.odds = oddsMap.get(oddsEvent.id) ?? null;
-  }
-
-  // ── Value picks ───────────────────────────────────────────────────────────
-  base.valuePicks = findValuePicks(base);
-
-  return base;
 }
 
+function normalizeKey(home: string, away: string): string {
+  const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6);
+  return `${n(home)}_${n(away)}`;
+}
+
+function normalizeStatus(type?: string): Match["status"] {
+  switch (type) {
+    case "inprogress": return "IN_PLAY";
+    case "finished":   return "FINISHED";
+    case "notstarted": return "SCHEDULED";
+    case "postponed":  return "POSTPONED";
+    case "canceled":   return "CANCELLED";
+    case "halftime":   return "PAUSED";
+    default:           return "SCHEDULED";
+  }
+}
+
+function inferStatus(commenceTime: string): Match["status"] {
+  const now = Date.now();
+  const start = new Date(commenceTime).getTime();
+  const diff = now - start;
+  if (diff < 0) return "SCHEDULED";
+  if (diff < 115 * 60 * 1000) return "IN_PLAY"; // within ~2h of start
+  return "FINISHED";
+}

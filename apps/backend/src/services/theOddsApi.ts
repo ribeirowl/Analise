@@ -103,8 +103,9 @@ export const FOOTBALL_SPORT_KEYS = [
   "soccer_france_ligue_one",
   "soccer_uefa_champs_league",
   "soccer_uefa_europa_league",
-  "soccer_conmebol_libertadores",
-  "soccer_conmebol_sudamericana",
+  "soccer_conmebol_copa_libertadores",
+  "soccer_portugal_primeira_liga",
+  "soccer_netherlands_eredivisie",
 ];
 
 export async function getOddsForSport(sportKey: string): Promise<RawEvent[]> {
@@ -175,6 +176,8 @@ export function normalizeOdds(events: RawEvent[]): Map<string, MatchOdds> {
 
   return map;
 }
+
+export { RawEvent };
 
 // Search for matching event by team names (fuzzy)
 export function findOddsEvent(
