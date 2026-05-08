@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-background text-slate-100;
+  }
+  * {
+    @apply border-slate-700;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface rounded-xl border border-slate-700/50 p-4;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors;
+  }
+  .btn-accent {
+    @apply btn bg-accent hover:bg-accent-dim text-white;
+  }
+}

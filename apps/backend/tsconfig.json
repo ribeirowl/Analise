@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "rootDir": "../../",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "paths": {
+      "@analise-futebol/shared": ["../../packages/shared/types"]
+    }
+  },
+  "include": ["src/**/*", "../../packages/shared/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
