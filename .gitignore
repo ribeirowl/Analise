@@ -9,3 +9,6 @@ Thumbs.db
 .turbo/
 coverage/
 *.tsbuildinfo
+__pycache__/
+*.pyc
+.claude/
