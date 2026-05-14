@@ -22,9 +22,8 @@ services:
     runtime: node
     region: oregon
     plan: free
-    rootDir: apps/backend
-    buildCommand: npm install && npx tsc
-    startCommand: node dist/apps/backend/src/index.js
+    buildCommand: npm install && npm run build --workspace=apps/backend
+    startCommand: node apps/backend/dist/apps/backend/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
@@ -56,7 +55,7 @@ services:
     region: oregon
     plan: free
     rootDir: apps/frontend
-    buildCommand: npm install && npm run build
+    buildCommand: cd ../.. && npm install && cd apps/frontend && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  FOOTBALL_DATA_API_KEY: z.string().min(1, "FOOTBALL_DATA_API_KEY is required"),
+  FOOTBALL_DATA_API_KEY: z.string().default(""),
   API_FOOTBALL_KEY: z.string().default(""),
   API_FOOTBALL_BASE_URL: z.string().default("https://v3.football.api-sports.io"),
   THESPORTSDB_KEY: z.string().default("3"),
