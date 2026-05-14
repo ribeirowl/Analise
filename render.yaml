@@ -24,7 +24,7 @@ services:
     plan: free
     rootDir: apps/backend
     buildCommand: npm install && npx tsc
-    startCommand: node dist/src/index.js
+    startCommand: node dist/apps/backend/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
