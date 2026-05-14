@@ -1,5 +1,6 @@
 statsbombpy>=1.0.3
 ScraperFC>=4.5.0
+penaltyblog>=0.9.0
 mplsoccer>=1.3.0
 pandas>=2.0.0
 numpy>=1.24.0

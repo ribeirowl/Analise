@@ -1,6 +1,8 @@
 import type { EnrichedMatch, ValuePick, BookmakerOdds, TeamSeasonStats } from "@analise-futebol/shared";
 import type { BzzoiroMatchData } from "../services/bzzoiro";
 import { bzzoiroProbToPoisson } from "../services/bzzoiro";
+import type { McpPrediction } from "../services/mcpData";
+import { mcpPredToPoissonInput } from "../services/mcpData";
 
 const MIN_EDGE = 0.05;
 
@@ -45,16 +47,13 @@ export function buildPoissonInput(
   };
 }
 
-/**
- * Compute value picks using bzzoiro CatBoost ML probabilities directly.
- * This is more accurate than Poisson when bzzoiro data is available.
- */
-export function findValuePicksFromBzzoiro(
-  match: EnrichedMatch,
-  bz: BzzoiroMatchData
-): ValuePick[] {
+type ProbInput = {
+  homeWinProb: number; drawProb: number; awayWinProb: number;
+  probOver25: number; probBTTS: number;
+};
+
+function _picksFromProbs(match: EnrichedMatch, probs: ProbInput, tag: string): ValuePick[] {
   if (!match.odds || match.odds.bookmakers.length === 0) return [];
-  const probs = bzzoiroProbToPoisson(bz);
   const picks: ValuePick[] = [];
   const best = getBestOdds(match.odds.bookmakers);
 
@@ -68,9 +67,19 @@ export function findValuePicksFromBzzoiro(
 
   const result = picks.sort((a, b) => b.edge - a.edge);
   if (result.length > 0) {
-    console.log(`[BZZOIRO] ${match.homeTeam.name} vs ${match.awayTeam.name}: ${result.length} picks (CatBoost v5.0)`);
+    console.log(`[${tag}] ${match.homeTeam.name} vs ${match.awayTeam.name}: ${result.length} picks`);
   }
   return result;
+}
+
+/** Compute value picks using bzzoiro CatBoost ML probabilities. */
+export function findValuePicksFromBzzoiro(match: EnrichedMatch, bz: BzzoiroMatchData): ValuePick[] {
+  return _picksFromProbs(match, bzzoiroProbToPoisson(bz), "BZZOIRO");
+}
+
+/** Compute value picks using MCP CatBoost ML probabilities. */
+export function findValuePicksFromMcpPred(match: EnrichedMatch, pred: McpPrediction): ValuePick[] {
+  return _picksFromProbs(match, mcpPredToPoissonInput(pred), "MCP");
 }
 
 export function findValuePicks(match: EnrichedMatch, poissonInput?: PoissonInput): ValuePick[] {

@@ -9,8 +9,9 @@ import { getAllFootballOdds, normalizeOdds, findOddsEvent, RawEvent } from "../s
 import { espn } from "../services/espn";
 import { clubElo } from "../services/clubElo";
 import { understat } from "../services/understat";
-import { findValuePicks, findValuePicksFromBzzoiro, buildPoissonInput } from "./valueFinder";
+import { findValuePicks, findValuePicksFromBzzoiro, findValuePicksFromMcpPred, buildPoissonInput } from "./valueFinder";
 import { getBzzoiroMatches, findBzzoiroMatch, bzzoiroToMatchOdds } from "../services/bzzoiro";
+import { getMcpPredictions, getMcpOddsMap, getMcpFixtures, findMcpPrediction, mcpOddsToMatchOdds } from "../services/mcpData";
 import { upsertMatch, saveValuePicks, saveOddsSnapshot, updatePickResult } from "../services/supabase";
 import type { EnrichedMatch, Match, TeamSeasonStats, PlayerStats } from "@analise-futebol/shared";
 
@@ -62,10 +63,13 @@ export async function getEnrichedTodayMatches(date?: string): Promise<EnrichedMa
   logger.info(`Fetching match list for ${today}`);
 
   // Primary sources in parallel
-  const [afFixtures, allOddsEvents, bzzoiroMatches] = await Promise.all([
+  const [afFixtures, allOddsEvents, bzzoiroMatches, mcpPredictions, mcpOddsMap, mcpFixtures] = await Promise.all([
     getFixturesByDate(today),
     getAllFootballOdds(),
     getBzzoiroMatches(7),
+    getMcpPredictions(7),
+    getMcpOddsMap(7),
+    getMcpFixtures(today),
   ]);
 
   // Secondary sources after primary (lower priority, less critical)
@@ -74,7 +78,7 @@ export async function getEnrichedTodayMatches(date?: string): Promise<EnrichedMa
     espn.getAllScoreboards(),
   ]);
 
-  logger.info(`AF:${afFixtures.length} Odds:${allOddsEvents.length} FD:${fdMatches.length} ESPN:${espnEvents.length}`);
+  logger.info(`AF:${afFixtures.length} Odds:${allOddsEvents.length} FD:${fdMatches.length} ESPN:${espnEvents.length} MCP:${mcpFixtures.length}`);
 
   const oddsMap = normalizeOdds(allOddsEvents);
   const matchMap = new Map<string, EnrichedMatch>();
@@ -196,6 +200,40 @@ export async function getEnrichedTodayMatches(date?: string): Promise<EnrichedMa
     } as EnrichedMatch);
   }
 
+  // 6. MCP fixtures — fills remaining gaps and patches MCP odds into matches with no odds
+  for (const fix of mcpFixtures) {
+    const key = normalizeKey(fix.home_team, fix.away_team);
+    const mcpPred = findMcpPrediction(fix.home_team, fix.away_team, mcpPredictions);
+    const mcpOddsRows = mcpPred ? (mcpOddsMap.get(mcpPred.event_id) ?? []) : [];
+    const mcpOdds = mcpOddsRows.length > 0 ? mcpOddsToMatchOdds(mcpPred!.event_id, mcpOddsRows) : null;
+
+    if (matchMap.has(key)) {
+      const existing = matchMap.get(key)!;
+      if (!existing.odds && mcpOdds) existing.odds = mcpOdds;
+      continue;
+    }
+    const ts = new Date(fix.event_date).getTime() / 1000;
+    if (ts < todayStart || ts >= todayEnd) continue;
+    const score = {
+      fullTime: { home: fix.home_score ?? null, away: fix.away_score ?? null },
+      halfTime: { home: fix.home_score_ht ?? null, away: fix.away_score_ht ?? null },
+    };
+    matchMap.set(key, {
+      id: `mcp_${fix.id}`,
+      competition: { id: fix.league_id, name: fix.league_name, code: "" },
+      homeTeam: { id: fix.home_team_id, name: fix.home_team },
+      awayTeam: { id: fix.away_team_id, name: fix.away_team },
+      utcDate: fix.event_date,
+      status: inferStatus(fix.event_date),
+      score,
+      odds: mcpOdds,
+      homeLineup: null, awayLineup: null,
+      homeTopPlayers: [], awayTopPlayers: [],
+      homeSeasonStats: null, awaySeasonStats: null,
+      valuePicks: [], lastEnriched: new Date().toISOString(),
+    } as EnrichedMatch);
+  }
+
   const matches = Array.from(matchMap.values());
   matches.sort((a, b) => {
     const order = (s: string) => (s === "IN_PLAY" || s === "PAUSED" ? 0 : s === "FINISHED" ? 2 : 1);
@@ -205,24 +243,30 @@ export async function getEnrichedTodayMatches(date?: string): Promise<EnrichedMa
 
   logger.info(`Total matches (filtered to main leagues): ${matches.length}`);
 
-  // Compute value picks — prefer bzzoiro CatBoost probabilities, fallback to Elo+Poisson
+  // Compute value picks — MCP CatBoost > bzzoiro CatBoost > Elo+Poisson fallback
   const scheduledMatches = matches.filter((m) => m.odds && m.status !== "FINISHED");
   if (scheduledMatches.length > 0) {
     await Promise.allSettled(
       scheduledMatches.map(async (m) => {
         try {
-          const bz = findBzzoiroMatch(m.homeTeam.name, m.awayTeam.name, bzzoiroMatches);
-          if (bz && bz.prob_home !== null) {
-            // CatBoost ML probabilities from bzzoiro — primary path
-            m.valuePicks = findValuePicksFromBzzoiro(m, bz);
+          const mcpPred = findMcpPrediction(m.homeTeam.name, m.awayTeam.name, mcpPredictions);
+          if (mcpPred && mcpPred.prob_home !== null) {
+            // MCP CatBoost ML probabilities — primary path
+            m.valuePicks = findValuePicksFromMcpPred(m, mcpPred);
           } else {
-            // Fallback: Elo-adjusted Poisson
-            const eloDiff = await Promise.race([
-              clubElo.getEloDiff(m.homeTeam.name, m.awayTeam.name),
-              new Promise<number>((res) => setTimeout(() => res(0), 3000)),
-            ]);
-            const input = buildPoissonInput(m.homeSeasonStats, m.awaySeasonStats, eloDiff);
-            m.valuePicks = findValuePicks(m, input);
+            const bz = findBzzoiroMatch(m.homeTeam.name, m.awayTeam.name, bzzoiroMatches);
+            if (bz && bz.prob_home !== null) {
+              // bzzoiro CatBoost ML probabilities — secondary path
+              m.valuePicks = findValuePicksFromBzzoiro(m, bz);
+            } else {
+              // Fallback: Elo-adjusted Poisson
+              const eloDiff = await Promise.race([
+                clubElo.getEloDiff(m.homeTeam.name, m.awayTeam.name),
+                new Promise<number>((res) => setTimeout(() => res(0), 3000)),
+              ]);
+              const input = buildPoissonInput(m.homeSeasonStats, m.awaySeasonStats, eloDiff);
+              m.valuePicks = findValuePicks(m, input);
+            }
           }
         } catch {
           m.valuePicks = findValuePicks(m, buildPoissonInput(m.homeSeasonStats, m.awaySeasonStats, 0));
