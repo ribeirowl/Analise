@@ -5,6 +5,8 @@ const envSchema = z.object({
   API_FOOTBALL_KEY: z.string().default(""),
   API_FOOTBALL_BASE_URL: z.string().default("https://v3.football.api-sports.io"),
   THESPORTSDB_KEY: z.string().default("3"),
+  SUPABASE_URL: z.string().default(""),
+  SUPABASE_ANON_KEY: z.string().default(""),
   ODDS_API_KEY: z.string().default(""),
   ODDS_API_REGIONS: z.string().default("eu,uk"),
   ODDS_API_BOOKMAKERS: z.string().default("bet365,pinnacle,betfair_ex_eu"),

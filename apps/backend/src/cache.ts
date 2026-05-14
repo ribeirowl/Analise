@@ -75,12 +75,12 @@ setInterval(() => cache.prune(), 10 * 60 * 1000);
 
 // TTL constants (ms)
 export const TTL = {
-  FOOTBALL_DATA_MATCHES: 5 * 60 * 1000,       // 5 min
+  FOOTBALL_DATA_MATCHES: 10 * 60 * 1000,       // 10 min
   FOOTBALL_DATA_TEAM: 60 * 60 * 1000,          // 1h
   SOFASCORE_LINEUPS: 30 * 60 * 1000,           // 30 min
   SOFASCORE_STATS: 6 * 60 * 60 * 1000,         // 6h
   SOFASCORE_EVENT: 5 * 60 * 1000,              // 5 min
-  ODDS_API: 30 * 60 * 1000,                    // 30 min (save quota)
-  ENRICHED_MATCH: 5 * 60 * 1000,               // 5 min
-  VALUE_PICKS: 5 * 60 * 1000,                  // 5 min
+  ODDS_API: 12 * 60 * 60 * 1000,               // 12h — preserve monthly quota
+  ENRICHED_MATCH: 10 * 60 * 1000,              // 10 min
+  VALUE_PICKS: 10 * 60 * 1000,                 // 10 min
 };

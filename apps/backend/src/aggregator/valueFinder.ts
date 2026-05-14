@@ -1,4 +1,6 @@
 import type { EnrichedMatch, ValuePick, BookmakerOdds, TeamSeasonStats } from "@analise-futebol/shared";
+import type { BzzoiroMatchData } from "../services/bzzoiro";
+import { bzzoiroProbToPoisson } from "../services/bzzoiro";
 
 const MIN_EDGE = 0.05;
 
@@ -18,10 +20,11 @@ export function buildPoissonInput(
   const gp_h = Math.max(homeStats?.gamesPlayed ?? 1, 1);
   const gp_a = Math.max(awayStats?.gamesPlayed ?? 1, 1);
 
-  let homeAvgGF = (homeStats?.goalsScored ?? 0) / gp_h || 1.3;
-  let awayAvgGF = (awayStats?.goalsScored ?? 0) / gp_a || 1.1;
-  const homeAvgGA = (homeStats?.goalsConceded ?? 0) / gp_h || 1.2;
-  const awayAvgGA = (awayStats?.goalsConceded ?? 0) / gp_a || 1.4;
+  // Prefer home/away specific averages from the new rich stats if available
+  let homeAvgGF = (homeStats?.homeAvgGoalsFor ?? homeStats?.avgGoalsFor ?? ((homeStats?.goalsScored ?? 0) / gp_h)) || 1.3;
+  let awayAvgGF = (awayStats?.awayAvgGoalsFor ?? awayStats?.avgGoalsFor ?? ((awayStats?.goalsScored ?? 0) / gp_a)) || 1.1;
+  const homeAvgGA = (homeStats?.homeAvgGoalsAgainst ?? homeStats?.avgGoalsAgainst ?? ((homeStats?.goalsConceded ?? 0) / gp_h)) || 1.2;
+  const awayAvgGA = (awayStats?.awayAvgGoalsAgainst ?? awayStats?.avgGoalsAgainst ?? ((awayStats?.goalsConceded ?? 0) / gp_a)) || 1.4;
 
   // Blend with xG from Understat when available (more predictive)
   if (homeXG) homeAvgGF = homeAvgGF * 0.4 + homeXG * 0.6;
@@ -40,6 +43,34 @@ export function buildPoissonInput(
     awayExpectedGoals: Math.max(awayExpected - eloAdj, 0.1),
     eloDiff,
   };
+}
+
+/**
+ * Compute value picks using bzzoiro CatBoost ML probabilities directly.
+ * This is more accurate than Poisson when bzzoiro data is available.
+ */
+export function findValuePicksFromBzzoiro(
+  match: EnrichedMatch,
+  bz: BzzoiroMatchData
+): ValuePick[] {
+  if (!match.odds || match.odds.bookmakers.length === 0) return [];
+  const probs = bzzoiroProbToPoisson(bz);
+  const picks: ValuePick[] = [];
+  const best = getBestOdds(match.odds.bookmakers);
+
+  if (best.home) checkValue(picks, match, "home_win", `Vitória ${match.homeTeam.name}`, best.home, best.homeBookmaker, probs.homeWinProb);
+  if (best.draw) checkValue(picks, match, "draw", "Empate", best.draw, best.drawBookmaker, probs.drawProb);
+  if (best.away) checkValue(picks, match, "away_win", `Vitória ${match.awayTeam.name}`, best.away, best.awayBookmaker, probs.awayWinProb);
+  if (best.over25) checkValue(picks, match, "over_25", "Mais de 2.5 gols", best.over25, best.over25Bookmaker, probs.probOver25);
+  if (best.under25) checkValue(picks, match, "under_25", "Menos de 2.5 gols", best.under25, best.under25Bookmaker, 1 - probs.probOver25);
+  if (best.btts_yes) checkValue(picks, match, "btts_yes", "Ambas marcam: Sim", best.btts_yes, best.btts_yes_bookmaker, probs.probBTTS);
+  if (best.btts_no) checkValue(picks, match, "btts_no", "Ambas marcam: Não", best.btts_no, best.btts_no_bookmaker, 1 - probs.probBTTS);
+
+  const result = picks.sort((a, b) => b.edge - a.edge);
+  if (result.length > 0) {
+    console.log(`[BZZOIRO] ${match.homeTeam.name} vs ${match.awayTeam.name}: ${result.length} picks (CatBoost v5.0)`);
+  }
+  return result;
 }
 
 export function findValuePicks(match: EnrichedMatch, poissonInput?: PoissonInput): ValuePick[] {

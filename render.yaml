@@ -1,4 +1,22 @@
 services:
+  # ── Python microservice (ScraperFC + StatsBomb) ──────────────────────────────
+  - type: web
+    name: analise-futebol-python
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: apps/python-service
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PYTHON_SERVICE_PORT
+        value: 10000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+  # ── Node.js backend ──────────────────────────────────────────────────────────
   - type: web
     name: analise-futebol-backend
     runtime: node
@@ -6,21 +24,42 @@ services:
     plan: free
     rootDir: apps/backend
     buildCommand: npm install && npx tsc
-    startCommand: node dist/apps/backend/src/index.js
+    startCommand: node dist/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: LOG_LEVEL
         value: info
       - key: PORT
-        value: 3001
+        value: 10000
       - key: ODDS_API_REGIONS
         value: eu,uk
       - key: ODDS_API_BOOKMAKERS
         value: bet365,pinnacle,betfair_ex_eu
-      - key: SOFASCORE_USER_AGENT
-        value: Mozilla/5.0 (compatible; FutebolAnalise/1.0; educational)
       - key: FOOTBALL_DATA_API_KEY
         sync: false
+      - key: API_FOOTBALL_KEY
+        sync: false
       - key: ODDS_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: PYTHON_SERVICE_URL
+        sync: false
+
+  # ── Next.js frontend ─────────────────────────────────────────────────────────
+  - type: web
+    name: analise-futebol-frontend
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: apps/frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
         sync: false

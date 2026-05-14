@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@analise-futebol/shared": "*",
+    "@supabase/supabase-js": "^2.105.4",
     "@tanstack/react-query": "^5.17.9",
     "clsx": "^2.1.0",
     "lucide-react": "^0.309.0",

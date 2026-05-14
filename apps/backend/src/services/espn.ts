@@ -1,11 +1,12 @@
 import { cache, TTL } from "../cache";
 import { logger } from "../logger";
 
+// Only main leagues — removed Eredivisie, Portuguesa to avoid wasting requests
 const LEAGUE_CODES: Record<string, string> = {
-  PL: "eng.1", LaLiga: "esp.1", SerieA: "ita.1",
+  PL: "eng.1", Championship: "eng.2", LaLiga: "esp.1", SerieA: "ita.1",
   Bundesliga: "ger.1", Ligue1: "fra.1", Brasileirao: "bra.1",
-  Libertadores: "conmebol.libertadores", UCL: "uefa.champions",
-  Eredivisie: "ned.1", PrimeiraLiga: "por.1",
+  Libertadores: "conmebol.libertadores", Sudamericana: "conmebol.sudamericana",
+  UCL: "uefa.champions", UEL: "uefa.europa",
 };
 
 export interface ESPNEvent {

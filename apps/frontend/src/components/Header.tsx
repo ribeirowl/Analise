@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, BarChart2 } from "lucide-react";
 
 export default function Header() {
   return (
@@ -17,6 +17,10 @@ export default function Header() {
                 <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
                 Picks com Valor
               </span>
+            </Link>
+            <Link href="/history" className="hover:text-slate-100 transition-colors flex items-center gap-1">
+              <BarChart2 className="h-4 w-4" />
+              Histórico
             </Link>
           </nav>
         </div>

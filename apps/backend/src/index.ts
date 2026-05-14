@@ -11,6 +11,7 @@ import oddsRouter from "./routes/odds";
 import valueRouter from "./routes/value";
 import teamsRouter from "./routes/teams";
 import predictionsRouter from "./routes/predictions";
+import statsRouter from "./routes/stats";
 import { startRefreshJobs } from "./jobs/refreshOdds";
 import { getApiFootballQuota } from "./services/apiFootball";
 import type { HealthStatus } from "@analise-futebol/shared";
@@ -28,6 +29,7 @@ app.use("/api/odds", oddsRouter);
 app.use("/api/value", valueRouter);
 app.use("/api/teams", teamsRouter);
 app.use("/api/matches", predictionsRouter);
+app.use("/api/stats", statsRouter);
 
 app.get("/api/health", (_req, res) => {
   const oddsQuota = getOddsApiQuota();

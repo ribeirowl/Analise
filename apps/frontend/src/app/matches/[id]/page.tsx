@@ -141,11 +141,29 @@ export default function MatchPage({ params }: { params: { id: string } }) {
       {tab === "stats" && (
         <div className="space-y-6">
           {match.homeSeasonStats && match.awaySeasonStats && (
-            <div className="card">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Comparação</h3>
-              <StatsChart home={match.homeSeasonStats} away={match.awaySeasonStats} />
-            </div>
+            <>
+              {/* Home / Away / Overall splits table */}
+              <div className="card overflow-x-auto">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Desempenho na Temporada</h3>
+                <TeamSplitsTable home={match.homeSeasonStats} away={match.awaySeasonStats} />
+              </div>
+
+              {/* 1st half / 2nd half */}
+              {(match.homeSeasonStats.firstHalfGoalsFor != null || match.homeSeasonStats.secondHalfGoalsFor != null) && (
+                <div className="card overflow-x-auto">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Gols por Tempo</h3>
+                  <HalfTimeTable home={match.homeSeasonStats} away={match.awaySeasonStats} />
+                </div>
+              )}
+
+              {/* Chart */}
+              <div className="card">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Comparação Visual</h3>
+                <StatsChart home={match.homeSeasonStats} away={match.awaySeasonStats} />
+              </div>
+            </>
           )}
+
           {(match.homeTopPlayers.length > 0 || match.awayTopPlayers.length > 0) && (
             <div className="card space-y-6">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">Top Jogadores</h3>
@@ -153,6 +171,7 @@ export default function MatchPage({ params }: { params: { id: string } }) {
               <PlayerStatsTable players={match.awayTopPlayers} title={match.awayTeam.name} />
             </div>
           )}
+
           {(match.homeLineup || match.awayLineup) && (
             <div className="card">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-4">Escalações</h3>
@@ -190,6 +209,7 @@ export default function MatchPage({ params }: { params: { id: string } }) {
               </div>
             </div>
           )}
+
           {!match.homeSeasonStats && !match.homeTopPlayers.length && !match.homeLineup && (
             <div className="card text-center py-8 text-muted text-sm">
               Estatísticas detalhadas não disponíveis. Configure API_FOOTBALL_KEY no backend para habilitar.
@@ -248,6 +268,97 @@ export default function MatchPage({ params }: { params: { id: string } }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Stats sub-components ───────────────────────────────────────────────────
+import type { TeamSeasonStats } from "@analise-futebol/shared";
+
+function TeamSplitsTable({ home, away }: { home: TeamSeasonStats; away: TeamSeasonStats }) {
+  const row = (label: string, hVal: number | string | undefined, aVal: number | string | undefined) => (
+    <tr key={label} className="border-b border-slate-700/40 hover:bg-surface-2/30">
+      <td className="py-2 px-3 text-sm font-semibold text-green-400">{fmt(hVal)}</td>
+      <td className="py-2 px-3 text-sm text-center text-muted text-xs">{label}</td>
+      <td className="py-2 px-3 text-sm font-semibold text-blue-400 text-right">{fmt(aVal)}</td>
+    </tr>
+  );
+
+  const fmt = (v: number | string | undefined) => (v == null || v === "" ? "—" : v);
+
+  return (
+    <table className="w-full">
+      <thead>
+        <tr className="text-xs text-muted">
+          <th className="pb-2 px-3 text-left text-green-400">{home.teamName}</th>
+          <th className="pb-2 px-3 text-center">Stat</th>
+          <th className="pb-2 px-3 text-right text-blue-400">{away.teamName}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {row("Jogos", home.gamesPlayed, away.gamesPlayed)}
+        {row("V / E / D", `${home.wins ?? "—"}/${home.draws ?? "—"}/${home.losses ?? "—"}`, `${away.wins ?? "—"}/${away.draws ?? "—"}/${away.losses ?? "—"}`)}
+        {row("Gols (geral)", `${home.goalsScored ?? "—"}/${home.goalsConceded ?? "—"}`, `${away.goalsScored ?? "—"}/${away.goalsConceded ?? "—"}`)}
+        {row("Média gols/jogo", home.avgGoalsFor?.toFixed(2), away.avgGoalsFor?.toFixed(2))}
+        {row("Média sofre/jogo", home.avgGoalsAgainst?.toFixed(2), away.avgGoalsAgainst?.toFixed(2))}
+        {row("Em casa V/E/D", `${home.homeWins ?? "—"}/${home.homeDraws ?? "—"}/${home.homeLosses ?? "—"}`, `${away.homeWins ?? "—"}/${away.homeDraws ?? "—"}/${away.homeLosses ?? "—"}`)}
+        {row("Gols em casa/jogo", home.homeAvgGoalsFor?.toFixed(2), away.homeAvgGoalsFor?.toFixed(2))}
+        {row("Sofre em casa/jogo", home.homeAvgGoalsAgainst?.toFixed(2), away.homeAvgGoalsAgainst?.toFixed(2))}
+        {row("Fora V/E/D", `${home.awayWins ?? "—"}/${home.awayDraws ?? "—"}/${home.awayLosses ?? "—"}`, `${away.awayWins ?? "—"}/${away.awayDraws ?? "—"}/${away.awayLosses ?? "—"}`)}
+        {row("Gols fora/jogo", home.awayAvgGoalsFor?.toFixed(2), away.awayAvgGoalsFor?.toFixed(2))}
+        {row("Sofre fora/jogo", home.awayAvgGoalsAgainst?.toFixed(2), away.awayAvgGoalsAgainst?.toFixed(2))}
+        {row("Clean sheets", home.cleanSheets, away.cleanSheets)}
+        {row("CS em casa / fora", `${home.homeCleanSheets ?? "—"} / ${home.awayCleanSheets ?? "—"}`, `${away.homeCleanSheets ?? "—"} / ${away.awayCleanSheets ?? "—"}`)}
+      </tbody>
+    </table>
+  );
+}
+
+function HalfTimeTable({ home, away }: { home: TeamSeasonStats; away: TeamSeasonStats }) {
+  const gp_h = home.gamesPlayed ?? 1;
+  const gp_a = away.gamesPlayed ?? 1;
+
+  const rows = [
+    {
+      label: "1º Tempo — gols marcados",
+      home: home.firstHalfGoalsFor != null ? `${home.firstHalfGoalsFor} (${(home.firstHalfGoalsFor / gp_h).toFixed(2)}/j)` : "—",
+      away: away.firstHalfGoalsFor != null ? `${away.firstHalfGoalsFor} (${(away.firstHalfGoalsFor / gp_a).toFixed(2)}/j)` : "—",
+    },
+    {
+      label: "1º Tempo — gols sofridos",
+      home: home.firstHalfGoalsAgainst != null ? `${home.firstHalfGoalsAgainst} (${(home.firstHalfGoalsAgainst / gp_h).toFixed(2)}/j)` : "—",
+      away: away.firstHalfGoalsAgainst != null ? `${away.firstHalfGoalsAgainst} (${(away.firstHalfGoalsAgainst / gp_a).toFixed(2)}/j)` : "—",
+    },
+    {
+      label: "2º Tempo — gols marcados",
+      home: home.secondHalfGoalsFor != null ? `${home.secondHalfGoalsFor} (${(home.secondHalfGoalsFor / gp_h).toFixed(2)}/j)` : "—",
+      away: away.secondHalfGoalsFor != null ? `${away.secondHalfGoalsFor} (${(away.secondHalfGoalsFor / gp_a).toFixed(2)}/j)` : "—",
+    },
+    {
+      label: "2º Tempo — gols sofridos",
+      home: home.secondHalfGoalsAgainst != null ? `${home.secondHalfGoalsAgainst} (${(home.secondHalfGoalsAgainst / gp_a).toFixed(2)}/j)` : "—",
+      away: away.secondHalfGoalsAgainst != null ? `${away.secondHalfGoalsAgainst} (${(away.secondHalfGoalsAgainst / gp_a).toFixed(2)}/j)` : "—",
+    },
+  ];
+
+  return (
+    <table className="w-full">
+      <thead>
+        <tr className="text-xs text-muted">
+          <th className="pb-2 px-3 text-left text-green-400">{home.teamName}</th>
+          <th className="pb-2 px-3 text-center">Período</th>
+          <th className="pb-2 px-3 text-right text-blue-400">{away.teamName}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ label, home: h, away: a }) => (
+          <tr key={label} className="border-b border-slate-700/40 hover:bg-surface-2/30">
+            <td className="py-2 px-3 text-sm font-semibold text-green-400">{h}</td>
+            <td className="py-2 px-3 text-xs text-muted text-center">{label}</td>
+            <td className="py-2 px-3 text-sm font-semibold text-blue-400 text-right">{a}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

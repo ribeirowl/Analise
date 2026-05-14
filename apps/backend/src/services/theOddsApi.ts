@@ -93,10 +93,10 @@ interface RawEvent {
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
-// Football sport keys available in The Odds API
+// Only main leagues — no peripheral competitions to preserve monthly quota
 export const FOOTBALL_SPORT_KEYS = [
-  "soccer_brazil_campeonato",
   "soccer_epl",
+  "soccer_england_efl_champ",
   "soccer_spain_la_liga",
   "soccer_italy_serie_a",
   "soccer_germany_bundesliga",
@@ -104,12 +104,17 @@ export const FOOTBALL_SPORT_KEYS = [
   "soccer_uefa_champs_league",
   "soccer_uefa_europa_league",
   "soccer_conmebol_copa_libertadores",
-  "soccer_portugal_primeira_liga",
-  "soccer_netherlands_eredivisie",
+  "soccer_conmebol_copa_sudamericana",
+  "soccer_brazil_campeonato",
 ];
 
 export async function getOddsForSport(sportKey: string): Promise<RawEvent[]> {
   if (!config.ODDS_API_KEY) return [];
+  // Block entirely if quota is exhausted — don't waste requests that won't return data
+  if (requestsRemaining !== null && requestsRemaining < 0) {
+    logger.warn(`Odds API quota exhausted (${requestsRemaining}), skipping fetch for ${sportKey}`);
+    return [];
+  }
   const markets = "h2h,totals";
   const regions = config.ODDS_API_REGIONS;
   const path = `/sports/${sportKey}/odds?regions=${regions}&markets=${markets}&oddsFormat=decimal`;
@@ -122,13 +127,21 @@ export async function getOddsForSport(sportKey: string): Promise<RawEvent[]> {
 }
 
 export async function getAllFootballOdds(): Promise<RawEvent[]> {
+  // Guard: if quota already known to be exhausted, skip all fetches
+  if (requestsRemaining !== null && requestsRemaining < 0) {
+    logger.warn(`Odds API quota exhausted — returning empty. Resets next month.`);
+    return [];
+  }
   const results: RawEvent[] = [];
-  // Fetch all sport keys in parallel but rate limit a bit
-  await Promise.allSettled(
-    FOOTBALL_SPORT_KEYS.map((key) =>
-      getOddsForSport(key).then((events) => results.push(...events))
-    )
-  );
+  // Sequential fetches to stay within rate limits and track quota between calls
+  for (const key of FOOTBALL_SPORT_KEYS) {
+    const events = await getOddsForSport(key);
+    results.push(...events);
+    if (requestsRemaining !== null && requestsRemaining < 5) {
+      logger.warn(`Odds API almost exhausted after ${key}, stopping early`);
+      break;
+    }
+  }
   return results;
 }
 

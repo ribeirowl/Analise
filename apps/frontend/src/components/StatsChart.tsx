@@ -14,13 +14,32 @@ export default function StatsChart({ home, away, homeColor = "#22c55e", awayColo
   const gp_a = away.gamesPlayed ?? 1;
 
   const data = [
-    { stat: "Gols/jogo", home: ((home.goalsScored ?? 0) / gp_h).toFixed(2), away: ((away.goalsScored ?? 0) / gp_a).toFixed(2) },
-    { stat: "Gols sofridos", home: ((home.goalsConceded ?? 0) / gp_h).toFixed(2), away: ((away.goalsConceded ?? 0) / gp_a).toFixed(2) },
-    { stat: "Chutes a gol", home: home.avgShotsFor?.toFixed(1) ?? 0, away: away.avgShotsFor?.toFixed(1) ?? 0 },
-    { stat: "Posse (%)", home: home.avgPossession?.toFixed(0) ?? 0, away: away.avgPossession?.toFixed(0) ?? 0 },
-    { stat: "Escanteios", home: home.avgCorners?.toFixed(1) ?? 0, away: away.avgCorners?.toFixed(1) ?? 0 },
-    { stat: "Faltas", home: home.avgFoulsCommitted?.toFixed(1) ?? 0, away: away.avgFoulsCommitted?.toFixed(1) ?? 0 },
-  ];
+    {
+      stat: "Gols/jogo",
+      home: (home.avgGoalsFor ?? (home.goalsScored ?? 0) / gp_h).toFixed(2),
+      away: (away.avgGoalsFor ?? (away.goalsScored ?? 0) / gp_a).toFixed(2),
+    },
+    {
+      stat: "Sofre/jogo",
+      home: (home.avgGoalsAgainst ?? (home.goalsConceded ?? 0) / gp_h).toFixed(2),
+      away: (away.avgGoalsAgainst ?? (away.goalsConceded ?? 0) / gp_a).toFixed(2),
+    },
+    {
+      stat: "Gols em casa/jogo",
+      home: home.homeAvgGoalsFor?.toFixed(2) ?? "—",
+      away: away.homeAvgGoalsFor?.toFixed(2) ?? "—",
+    },
+    {
+      stat: "Gols fora/jogo",
+      home: home.awayAvgGoalsFor?.toFixed(2) ?? "—",
+      away: away.awayAvgGoalsFor?.toFixed(2) ?? "—",
+    },
+    {
+      stat: "CS total",
+      home: home.cleanSheets ?? 0,
+      away: away.cleanSheets ?? 0,
+    },
+  ].filter((d) => d.home !== "—" && d.away !== "—");
 
   return (
     <ResponsiveContainer width="100%" height={260}>

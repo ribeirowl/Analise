@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=apps/backend\" \"npm run dev --workspace=apps/frontend\"",
+    "dev": "concurrently \"npm run dev --workspace=apps/backend\" \"npm run dev --workspace=apps/frontend\" \"npm run dev:py\"",
+    "dev:py": "cd apps/python-service && python main.py",
     "build": "npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
     "install:all": "npm install"
   },

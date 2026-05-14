@@ -43,18 +43,50 @@ export interface TeamSeasonStats {
   teamId: number;
   teamName: string;
   competitionId: number;
+  // Overall
+  gamesPlayed?: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
   goalsScored?: number;
   goalsConceded?: number;
+  avgGoalsFor?: number;
+  avgGoalsAgainst?: number;
+  // Home splits
+  homeGamesPlayed?: number;
+  homeWins?: number;
+  homeDraws?: number;
+  homeLosses?: number;
+  homeGoalsScored?: number;
+  homeGoalsConceded?: number;
+  homeAvgGoalsFor?: number;
+  homeAvgGoalsAgainst?: number;
+  // Away splits
+  awayGamesPlayed?: number;
+  awayWins?: number;
+  awayDraws?: number;
+  awayLosses?: number;
+  awayGoalsScored?: number;
+  awayGoalsConceded?: number;
+  awayAvgGoalsFor?: number;
+  awayAvgGoalsAgainst?: number;
+  // 1st half / 2nd half goals
+  firstHalfGoalsFor?: number;
+  firstHalfGoalsAgainst?: number;
+  secondHalfGoalsFor?: number;
+  secondHalfGoalsAgainst?: number;
+  // Clean sheets / failed to score
+  cleanSheets?: number;
+  homeCleanSheets?: number;
+  awayCleanSheets?: number;
+  failedToScore?: number;
+  // Misc
   avgShotsFor?: number;
   avgShotsAgainst?: number;
   avgPossession?: number;
   avgCorners?: number;
   avgFoulsCommitted?: number;
   avgYellowCards?: number;
-  wins?: number;
-  draws?: number;
-  losses?: number;
-  gamesPlayed?: number;
 }
 
 // ─── Lineup ────────────────────────────────────────────────────────────────

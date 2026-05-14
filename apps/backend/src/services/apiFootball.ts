@@ -47,12 +47,14 @@ async function fetchAF<T>(path: string, ttlMs: number): Promise<T | null> {
   }
 }
 
-// League ID map
+// League ID map — only main leagues, no random second divisions
 export const LEAGUE_IDS: Record<string, number> = {
-  PL: 39, LaLiga: 140, SerieA: 135, Bundesliga: 78, Ligue1: 61,
-  UCL: 2, UEL: 3, Libertadores: 13, Brasileirao: 71,
-  Eredivisie: 88, PrimeiraLiga: 94, Sudamericana: 11,
+  PL: 39, Championship: 40, LaLiga: 140, SerieA: 135, Bundesliga: 78, Ligue1: 61,
+  UCL: 2, UEL: 3, UECL: 848, Libertadores: 13, Sudamericana: 11, Brasileirao: 71,
 };
+
+// Set of allowed league IDs — used for filtering fixtures
+export const ALLOWED_LEAGUE_IDS = new Set(Object.values(LEAGUE_IDS));
 
 export const CURRENT_SEASON = 2025;
 
@@ -86,13 +88,26 @@ export interface AFTeamStats {
   team: { id: number; name: string };
   league: { id: number };
   goals: {
-    for: { average: { total: string } };
-    against: { average: { total: string } };
+    for: {
+      average: { home: string; away: string; total: string };
+      total: { home: number; away: number; total: number };
+      minute: Record<string, { total: number | null; percentage: string | null }>;
+    };
+    against: {
+      average: { home: string; away: string; total: string };
+      total: { home: number; away: number; total: number };
+      minute: Record<string, { total: number | null; percentage: string | null }>;
+    };
   };
-  fixtures: { wins: { total: number }; draws: { total: number }; loses: { total: number }; played: { total: number } };
-  biggest: { goals: { for: { total: number }; against: { total: number } } };
-  clean_sheet: { total: number };
-  failed_to_score: { total: number };
+  fixtures: {
+    wins: { home: number; away: number; total: number };
+    draws: { home: number; away: number; total: number };
+    loses: { home: number; away: number; total: number };
+    played: { home: number; away: number; total: number };
+  };
+  clean_sheet: { home: number; away: number; total: number };
+  failed_to_score: { home: number; away: number; total: number };
+  lineups: Array<{ formation: string; played: number }>;
 }
 
 export async function getTeamStats(teamId: number, leagueId: number): Promise<AFTeamStats | null> {
