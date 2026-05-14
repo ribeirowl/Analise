@@ -22,7 +22,7 @@ services:
     runtime: node
     region: oregon
     plan: free
-    buildCommand: npm install && npm run build --workspace=apps/backend
+    buildCommand: npm install --include=dev && npm run build --workspace=apps/backend
     startCommand: node apps/backend/dist/apps/backend/src/index.js
     envVars:
       - key: NODE_ENV
